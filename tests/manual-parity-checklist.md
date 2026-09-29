@@ -382,20 +382,46 @@ environment has no interactive display to look at a browser directly.
 - [x] Service worker cache bumped again to `v12` for these two follow-up
       fixes.
 
-## Still needs a real device (not available in this environment)
+## Verified against the real live deployment (2026-09-30)
 
-- [ ] After deploying to the real host (Firebase Hosting / GitHub Pages):
-      DevTools → Network → confirm `vendor/pdf.min.mjs` and
-      `vendor/pdf.worker.min.mjs` serve with `Content-Type: text/javascript`
-      (or `application/javascript`) — module scripts/workers refuse to run
-      on a wrong MIME type, and this can only be confirmed against the real
-      host, not local testing.
-- [ ] DevTools → Application → Manifest: confirm installable.
-- [ ] DevTools → Application → Service Workers: confirm registered/activated.
-- [ ] DevTools → Network → Offline, reload: confirm the shell loads from
-      cache and a full parse→edit→export cycle needs zero network requests
-      (headless Chrome here always had the local server available, so a
-      true offline reload hasn't been exercised yet).
+Deployed to Firebase Hosting (`https://roster-export-pwa.web.app`, project
+`roster-export-pwa`) and re-ran the real-Chrome checks against the actual
+live URL instead of `localhost` — this unblocked every item that was
+previously marked "needs a real device":
+
+- [x] `vendor/pdf.min.mjs` and `vendor/pdf.worker.min.mjs` serve as
+      `Content-Type: text/javascript` over real Firebase Hosting (`curl -I`
+      against the live URL); `service-worker.js` correctly gets
+      `Cache-Control: no-cache` while `.js`/`.mjs`/`.css` get a one-year
+      `max-age` (the custom `firebase.json` header rules); `tests/**` is
+      correctly excluded from the live deploy (404 on
+      `manual-parity-checklist.md`).
+- [x] Manifest linked, service worker registers — confirmed via
+      `navigator.serviceWorker.getRegistrations()` in a real page.
+- [x] **Real bug found and fixed via this deployment test** (would not have
+      surfaced on `localhost`, where the fix's absence never mattered): the
+      `controllerchange` listener in `app.js` reloaded the page
+      unconditionally, including on the very first-ever visit's
+      install→activate→claim sequence — not just on a genuine version
+      update for an already-controlled page. On `localhost`'s near-zero
+      latency this claim always completed before a test script got around
+      to uploading a file, masking the bug; on the real live URL's higher
+      latency, uploading a file shortly after first load raced the SW's
+      first claim, and the resulting auto-reload silently discarded the
+      in-progress upload (parse never completed, status stayed blank,
+      confirmed by inspecting worker lifecycle: the pdf.js worker was
+      created, then immediately closed by the reload). Fixed by only
+      reloading when the page **already had** a controller before this
+      registration (`hadController = !!navigator.serviceWorker.controller`
+      captured before `.register()`) — a first-ever claim now completes
+      silently with nothing to lose, and only a real "newer worker took
+      over from an older one" transition reloads. Redeployed
+      (`js/version.js` → `v18`) and re-verified clean.
+- [x] Full offline cycle against the real deployment: went offline after
+      the SW's first activation settled, reloaded — shell loaded from
+      cache, a complete upload→parse→export cycle succeeded with zero
+      network requests, zero console errors, same correct output
+      (`CAPT AHMAD BIN TESTING August 2026.pdf`) as the online path.
 
 ## Needs a real phone (not available in this environment)
 

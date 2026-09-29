@@ -10,6 +10,9 @@ Thumbs.db
 # Node (dev-only scratch, e.g. ad-hoc verification scripts)
 node_modules/
 
+# Firebase CLI's local deploy-hash cache — machine-specific, not source.
+.firebase/
+
 # Test fixtures — roster-shaped files, kept local only even though this one
 # uses placeholder data (tests/manual-parity-checklist.md documents what
 # it was used for and what the checks found).

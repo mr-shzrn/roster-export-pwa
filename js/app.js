@@ -240,6 +240,16 @@ import * as pdfjsLib from '../vendor/pdf.min.mjs';
   // --- Service worker registration (offline capability) ---
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
+      // A page's very first-ever visit has no controller yet; the initial
+      // install->activate->claim sequence fires 'controllerchange' too, not
+      // just a real version update. Reloading unconditionally on that first
+      // claim can race a user who starts using the app (e.g. uploads a
+      // file) while the SW is still installing in the background — the
+      // reload silently discards whatever they were doing. Only the
+      // "was already controlled, now controlled by a NEWER worker" case is
+      // an actual update worth reloading for.
+      const hadController = !!navigator.serviceWorker.controller;
+
       navigator.serviceWorker.register('service-worker.js')
         .then((reg) => {
           setInterval(() => reg.update(), 60000);
@@ -256,6 +266,7 @@ import * as pdfjsLib from '../vendor/pdf.min.mjs';
 
       let refreshing = false;
       navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (!hadController) return;
         if (refreshing) return;
         refreshing = true;
         window.location.reload();

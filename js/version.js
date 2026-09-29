@@ -6,4 +6,4 @@
  * service worker (via importScripts, where `self` is the worker's global
  * scope) — same file, same assignment, both contexts.
  */
-self.APP_VERSION = 'v17';
+self.APP_VERSION = 'v18';
