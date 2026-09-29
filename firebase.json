@@ -6,6 +6,7 @@
       "**/.*",
       "**/node_modules/**",
       "tests/**",
+      "icons/source-*.png",
       "README.md"
     ],
     "headers": [
