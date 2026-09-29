@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Roster Export</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#1E3A5F">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="topbar">
+    <span class="topbar-title">Roster Export</span>
+    <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Switch to dark theme">
+      <svg class="icon-sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><line x1="12" y1="2" x2="12" y2="4"></line><line x1="12" y1="20" x2="12" y2="22"></line><line x1="4.9" y1="4.9" x2="6.3" y2="6.3"></line><line x1="17.7" y1="17.7" x2="19.1" y2="19.1"></line><line x1="2" y1="12" x2="4" y2="12"></line><line x1="20" y1="12" x2="22" y2="12"></line><line x1="4.9" y1="19.1" x2="6.3" y2="17.7"></line><line x1="17.7" y1="6.3" x2="19.1" y2="4.9"></line></svg>
+      <svg class="icon-moon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"></path></svg>
+    </button>
+  </div>
+
+  <header>
+    <p class="subtitle">Offline roster PDF &rarr; styled export. Nothing leaves this device.</p>
+  </header>
+
+  <main>
+    <section id="upload-section" class="card">
+      <div class="step-heading">
+        <span class="step-badge">1</span>
+        <h2>Upload roster</h2>
+      </div>
+      <label for="file-input" class="file-label">
+        <span id="file-label-text">Choose roster file&hellip;</span>
+        <input type="file" id="file-input" accept="application/pdf,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
+      </label>
+      <p class="hint">PDF (Roster Report or Calendar Grid) or Excel (Roster Report) export.</p>
+      <p class="hint">Make sure the roster was exported in local time — an export taken in UTC can shift or drop dates.</p>
+      <div id="status" class="status" hidden></div>
+      <button id="start-over-btn" class="link-btn" type="button" hidden>Start over</button>
+    </section>
+
+    <section id="options-section" class="card" hidden>
+      <div class="step-heading">
+        <span class="step-badge">2</span>
+        <h2>Options</h2>
+      </div>
+      <label class="option-row">
+        <input type="checkbox" id="show-hotel" checked>
+        Show hotel column
+      </label>
+      <label class="option-row">
+        <input type="checkbox" id="show-duty-ac" checked>
+        Show duty code / A/C type columns
+      </label>
+      <label class="option-row rate-row">
+        Estimate allowance at
+        <span class="currency">RM</span>
+        <input type="number" id="rate-input" min="0" step="0.01" placeholder="e.g. 200" inputmode="decimal">
+        <span>/ hour</span>
+      </label>
+      <p class="hint">Optional — leave blank to skip the allowance estimate. This is a rough personal estimate, not an official pay calculation.</p>
+    </section>
+
+    <section id="editor-section" class="card" hidden>
+      <div class="step-heading">
+        <span class="step-badge">3</span>
+        <h2>Review</h2>
+      </div>
+      <div id="editor"></div>
+    </section>
+
+    <section id="export-section" class="card" hidden>
+      <div class="step-heading">
+        <span class="step-badge">4</span>
+        <h2>Export</h2>
+      </div>
+      <div class="export-buttons">
+        <button id="export-pdf-btn">Download PDF</button>
+        <button id="export-png-btn">Download Image</button>
+      </div>
+      <p class="hint">Nothing leaves your device — parsing and export happen entirely locally. This export is generated automatically and may contain errors; you're responsible for checking it against the original roster before relying on it.</p>
+      <div id="export-status" class="status" hidden></div>
+    </section>
+  </main>
+
+  <footer>
+    <span id="offline-indicator"></span>
+    <span id="app-version" class="app-version"></span>
+  </footer>
+
+  <!-- Single source of truth for the app version — read by app.js for the
+       footer and by service-worker.js (via importScripts) for the cache
+       name, so a deploy only needs this one number bumped. -->
+  <script src="js/version.js"></script>
+
+  <!-- Vendored, offline-capable libraries — no CDN dependency at runtime.
+       pdf.js 4.x ships ES-module builds only (no classic <script> build),
+       so it's imported directly by the three files below that need it
+       (pdf-textextract.js, render-png.js, app.js), not loaded as a global
+       here — jsPDF still ships a plain UMD build, so it stays a classic
+       global script consumed by render-pdf.js as before. -->
+  <script src="vendor/jspdf.umd.min.js"></script>
+
+  <script type="module" src="js/pdf-textextract.js"></script>
+  <script src="js/table-reconstruct.js"></script>
+  <script src="js/columns.js"></script>
+  <script src="js/styled-roster-parser.js"></script>
+  <script src="js/calendar-grid-parser.js"></script>
+  <script src="js/xlsx-textextract.js"></script>
+  <script src="js/xlsx-roster-parser.js"></script>
+  <script src="js/format-detect.js"></script>
+  <script src="js/allowance.js"></script>
+  <script src="js/editor.js"></script>
+  <script src="js/layout.js"></script>
+  <script src="js/render-pdf.js"></script>
+  <script type="module" src="js/render-png.js"></script>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
