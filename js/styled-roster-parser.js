@@ -67,6 +67,113 @@ window.RosterPWA = window.RosterPWA || {};
     return [parts.length ? parts[0].toUpperCase() : '', ''];
   }
 
+  function dateStrToDayIndex(dateStr) {
+    const p = parseDateParts(dateStr);
+    if (!p) return null;
+    return Math.round(Date.UTC(p.year, p.monthIdx, p.day) / 86400000);
+  }
+
+  function dayIndexToDateStr(idx) {
+    const d = new Date(idx * 86400000);
+    return `${String(d.getUTCDate()).padStart(2, '0')}-${MONTHS[d.getUTCMonth()]}-${d.getUTCFullYear()}`;
+  }
+
+  function hhmmToMinutes(t) {
+    const m = /^(\d{1,2}):(\d{2})/.exec((t || '').trim());
+    return m ? parseInt(m[1], 10) * 60 + parseInt(m[2], 10) : null;
+  }
+
+  function minutesToHHMM(mins) {
+    return `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`;
+  }
+
+  /** "06:50(+1)" -> { mins: 410, delta: 1 }; "06:50" -> { mins: 410, delta: 0 }. */
+  function parseTimeWithAnnotation(raw) {
+    const m = /^(\d{1,2}:\d{2})(?:\((\+|-)(\d+)\))?/.exec((raw || '').trim());
+    if (!m) return null;
+    const mins = hhmmToMinutes(m[1]);
+    const delta = m[2] ? (m[2] === '+' ? 1 : -1) * parseInt(m[3], 10) : 0;
+    return { mins, delta };
+  }
+
+  function formatTimeWithAnnotation(mins, delta) {
+    const hhmm = minutesToHHMM(mins);
+    return delta === 0 ? hhmm : `${hhmm}(${delta > 0 ? '+' : ''}${delta})`;
+  }
+
+  /** Shift one absolute cell (possibly carrying its own "(+1)"-style
+   * annotation relative to the row's OLD date) by a station's UTC offset,
+   * then re-express its day-rollover relative to the row's NEW
+   * (already-corrected) date. */
+  function shiftAbsoluteCell(raw, oldRowDayIdx, offsetHours, newRowDayIdx) {
+    const parsed = parseTimeWithAnnotation(raw);
+    if (!parsed) return raw;
+    const absMinutes = (oldRowDayIdx + parsed.delta) * 1440 + parsed.mins;
+    const shiftedAbs = absMinutes + Math.round(offsetHours * 60);
+    const newDayIdx = Math.floor(shiftedAbs / 1440);
+    const newMins = ((shiftedAbs % 1440) + 1440) % 1440;
+    return formatTimeWithAnnotation(newMins, newDayIdx - newRowDayIdx);
+  }
+
+  /** Look at a handful of raw signals collected while parsing (day-off
+   * Report times, OFF01 ground-duty Dep times) — both are fixed-time
+   * activities with a well-known LT value (00:00, 08:30 respectively) per
+   * this roster system's convention — to tell a genuine LT export apart
+   * from a raw-UTC one, without any explicit label in the file. */
+  function detectSourceTimezone(signals, homeBaseOffset) {
+    for (const sig of signals) {
+      const expectLT = sig.kind === 'dayoff' ? 0 : 510; // 00:00 or 08:30
+      const raw = sig.kind === 'dayoff' ? sig.reportRaw : sig.depRaw;
+      const mins = hhmmToMinutes(raw);
+      if (mins === null) continue;
+      if (mins === expectLT) return { tz: 'LT', uncertain: false };
+      const expectUtc = ((expectLT - Math.round(homeBaseOffset * 60)) % 1440 + 1440) % 1440;
+      if (mins === expectUtc) return { tz: 'UTC', uncertain: false };
+    }
+    return { tz: 'LT', uncertain: true };
+  }
+
+  /** Convert one duty-day's absolute times from raw UTC to LT, each cell
+   * using its own station's offset (Report/Debrief use the first leg's
+   * departure / last leg's arrival station, or home base for a
+   * station-less ground activity). Mutates and returns `day`. Durations
+   * (duty_hours, block_hours) are left untouched — already-elapsed times,
+   * invariant under relabeling. */
+  function convertDutyDayToLT(day, homeBaseOffset, offsetForFn) {
+    const rowDayIdx = dateStrToDayIndex(day.date);
+    if (rowDayIdx === null) { delete day._rawReport; return day; }
+
+    const reportStn = day.legs.length ? day.legs[0].dep_stn : '';
+    const reportOffset = reportStn ? offsetForFn(reportStn, homeBaseOffset) : homeBaseOffset;
+
+    let newRowDayIdx = rowDayIdx;
+    const reportRaw = day._rawReport;
+    if (reportRaw) {
+      const parsed = parseTimeWithAnnotation(reportRaw); // Report never carries its own annotation
+      if (parsed) {
+        const shiftedAbs = rowDayIdx * 1440 + parsed.mins + Math.round(reportOffset * 60);
+        newRowDayIdx = Math.floor(shiftedAbs / 1440);
+        if (day.duty_start) day.duty_start = minutesToHHMM(((shiftedAbs % 1440) + 1440) % 1440);
+      }
+    }
+
+    if (day.duty_end) {
+      const arrStn = day.legs.length ? day.legs[day.legs.length - 1].arr_stn : '';
+      const arrOffset = arrStn ? offsetForFn(arrStn, homeBaseOffset) : homeBaseOffset;
+      day.duty_end = shiftAbsoluteCell(day.duty_end, rowDayIdx, arrOffset, newRowDayIdx);
+    }
+
+    for (const leg of day.legs) {
+      if (leg.dep_time) leg.dep_time = shiftAbsoluteCell(leg.dep_time, rowDayIdx, offsetForFn(leg.dep_stn, homeBaseOffset), newRowDayIdx);
+      if (leg.arr_time) leg.arr_time = shiftAbsoluteCell(leg.arr_time, rowDayIdx, offsetForFn(leg.arr_stn, homeBaseOffset), newRowDayIdx);
+    }
+
+    day.date = dayIndexToDateStr(newRowDayIdx);
+    day.day = weekdayAbbrev(day.date);
+    delete day._rawReport;
+    return day;
+  }
+
   function computeOffDaysSplit(dutyDays, baseStation) {
     let atBase = 0;
     let away = 0;
@@ -95,6 +202,7 @@ window.RosterPWA = window.RosterPWA || {};
       this.warnings = [];
       this._inLegend = false;
       this._curDutyDay = null;
+      this._tzSignals = [];
     }
 
     handleRow(row, colMap) {
@@ -161,6 +269,7 @@ window.RosterPWA = window.RosterPWA || {};
         this._startNewDutyDay(dateCell, pairingCell, reportCell, dutyHrsCell);
 
         if (DAYOFF_CODES.includes(pairingCell)) {
+          this._tzSignals.push({ kind: 'dayoff', reportRaw: reportCell });
           const day = this._curDutyDay;
           day.item = pairingCell;
           day.duty_start = '';
@@ -171,6 +280,9 @@ window.RosterPWA = window.RosterPWA || {};
         if (!/^MH\d+/.test(itemCell)) {
           const code = itemCell || pairingCell;
           if (code) {
+            if (code === 'OFF01') {
+              this._tzSignals.push({ kind: 'off01', depRaw: parseStnTime(depCell)[1] });
+            }
             this._curDutyDay.item = code;
             this._curDutyDay.duty_end = debriefCell;
             this._appendLeg(code, depCell, arrCell, wtypeCell, flyingHrsCell,
@@ -208,6 +320,12 @@ window.RosterPWA = window.RosterPWA || {};
         pairing_ref: pairingRef, pairing_embedded_date: embeddedDate,
         duty_start: reportCell, duty_hours: dutyHrsCell, duty_end: '',
         item: '', legs: [],
+        // Kept only for UTC/LT detection + conversion — deleted before the
+        // parser returns. Needed because a day-off's own duty_start gets
+        // cleared to '' below, but its Report time (always home-base LT
+        // 00:00, or UTC-shifted otherwise) is the only signal that survives
+        // for that row.
+        _rawReport: reportCell,
       };
       this.dutyDays.push(day);
       this._curDutyDay = day;
@@ -247,6 +365,18 @@ window.RosterPWA = window.RosterPWA || {};
       for (const row of rows) state.handleRow(row, colMap);
     }
 
+    const homeBaseOffset = ns.airportTimezones.offsetFor(state.crewInfo.base || 'KUL', 8);
+    const tzResult = detectSourceTimezone(state._tzSignals, homeBaseOffset);
+    if (tzResult.tz === 'UTC') {
+      for (const day of state.dutyDays) convertDutyDayToLT(day, homeBaseOffset, ns.airportTimezones.offsetFor);
+      state.dutyDays.sort((a, b) => dateStrToDayIndex(a.date) - dateStrToDayIndex(b.date));
+      state.headerTotals.source_timezone = 'UTC (converted to LT)';
+    } else {
+      for (const day of state.dutyDays) delete day._rawReport;
+      state.headerTotals.source_timezone = 'LT';
+      if (tzResult.uncertain) state.headerTotals.source_timezone_uncertain = true;
+    }
+
     const [atBase, away] = computeOffDaysSplit(state.dutyDays, state.crewInfo.base || 'KUL');
     state.headerTotals.at_base = atBase;
     state.headerTotals.away = away;
@@ -267,5 +397,7 @@ window.RosterPWA = window.RosterPWA || {};
     // same header line / pairing-reference conventions, no PDF dependency.
     parsePairingEmbeddedDate, weekdayAbbrev, computeOffDaysSplit,
     DATE_RANGE_RE, CREW_RE, TOTALS_RE,
+    // UTC/LT detection + conversion — also reused by xlsx-roster-parser.js.
+    dateStrToDayIndex, dayIndexToDateStr, detectSourceTimezone, convertDutyDayToLT,
   };
 })(window.RosterPWA);

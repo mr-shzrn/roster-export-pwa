@@ -189,6 +189,10 @@ window.RosterPWA = window.RosterPWA || {};
           date: curDateStr, day: sp.weekdayAbbrev(curDateStr),
           duty_start: cell(row, colMap, 'dutyReport'), duty_hours: cell(row, colMap, 'dutyHrs'),
           duty_end: '', item: '', legs: [],
+          // Kept only for UTC/LT detection + conversion — deleted before
+          // this parser returns. See styled-roster-parser.js's same field
+          // for why: a day-off's own duty_start is cleared to '' below.
+          _rawReport: cell(row, colMap, 'dutyReport'),
         };
         dutyDays.push(curDay);
 
@@ -225,6 +229,37 @@ window.RosterPWA = window.RosterPWA || {};
       // Continuation row — another leg of the current duty block.
       if (!curDay || !isFlight) continue;
       appendLeg(sp, curDay, row, colMap, itemCell);
+    }
+
+    // Detect a raw-UTC export the same way styled-roster-parser.js does —
+    // day-off Report times and OFF01 ground-duty Dep times are fixed-LT
+    // sentinels (00:00, 08:30) per this roster system's convention — and
+    // convert to LT before gap-detection runs, so REST DAY filling below
+    // operates on correct calendar dates.
+    const homeBaseOffset = ns.airportTimezones.offsetFor(crewInfo.base || 'KUL', 8);
+    const tzSignals = [];
+    for (const day of dutyDays) {
+      if (DAYOFF_CODES.includes(day.item)) tzSignals.push({ kind: 'dayoff', reportRaw: day._rawReport });
+      else if (day.item === 'OFF01' && day.legs.length) tzSignals.push({ kind: 'off01', depRaw: day.legs[0].dep_time });
+    }
+    const tzResult = sp.detectSourceTimezone(tzSignals, homeBaseOffset);
+    if (tzResult.tz === 'UTC') {
+      for (const day of dutyDays) sp.convertDutyDayToLT(day, homeBaseOffset, ns.airportTimezones.offsetFor);
+      dutyDays.sort((a, b) => sp.dateStrToDayIndex(a.date) - sp.dateStrToDayIndex(b.date));
+      // Rebuilt from each day's own corrected date — the rare case of a
+      // continuation leg extending a block's range past its start (an
+      // overnight report spanning two calendar days) isn't re-derived
+      // here, since there's no real UTC xlsx sample yet to verify that
+      // combination against (documented limitation).
+      for (let i = 0; i < dutyDays.length; i++) {
+        const idx = sp.dateStrToDayIndex(dutyDays[i].date);
+        blockRanges[i] = { start: idx, end: idx };
+      }
+      headerTotals.source_timezone = 'UTC (converted to LT)';
+    } else {
+      for (const day of dutyDays) delete day._rawReport;
+      headerTotals.source_timezone = 'LT';
+      if (tzResult.uncertain) headerTotals.source_timezone_uncertain = true;
     }
 
     // A gap of more than one calendar day between the end of one block's

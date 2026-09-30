@@ -481,6 +481,41 @@ previously marked "needs a real device":
          Roster Report fixture (`roster_report_aug2026.pdf`, format
          detection + parse unchanged) and both xlsx fixtures (untouched,
          as expected — different code path).
+- [x] **2026-09-30, auto-detect UTC vs LT Roster Report exports**: given
+      two real PDFs of the same October roster (`OCT LT.pdf`/`OCT UTC.pdf`)
+      shifted by exactly 8h (KUL's UTC offset) with **no explicit
+      "UTC"/"LT" label anywhere in either file's text or metadata**, the
+      app previously had no way to tell them apart and silently treated
+      every upload as LT. Ported the sibling desktop app's verified
+      `AIRPORT_TIMEZONES` IATA->offset table into a new
+      `js/airport-timezones.js` (same values, not re-derived). Detection
+      reuses two fixed-time sentinels this roster system's own convention
+      guarantees: a day-off's Report time is always `00:00` LT, and an
+      `OFF01` ground-duty's Dep time is always `08:30` LT — a consistent
+      8h deviation from either means the file is raw UTC. Both signals had
+      to be captured *during* row parsing in `styled-roster-parser.js` /
+      `xlsx-roster-parser.js` (stashed as a `_rawReport` field, deleted
+      before the parser returns) since the existing day-off code path
+      already discarded that exact cell before this change. Conversion
+      (`convertDutyDayToLT`, shared via `styledRosterParser`'s exported
+      helpers) shifts every absolute time — Report, each leg's own Dep/Arr,
+      Debrief — by *that time's own station's* offset (confirmed via Shaz:
+      Dep/Arr are each station's true local time, not a single home-base
+      reference), independently re-deriving each cell's day-rollover
+      annotation and the day's own corrected calendar date; duty/flight
+      hour durations are left untouched (already elapsed-time invariant —
+      confirmed both sample PDFs print the identical `FH:47:45|DH:140:35`
+      totals). **Gold test**: converting `OCT UTC.pdf` produces
+      `duty_days` an exact match against `OCT LT.pdf`'s own. The exported
+      document's Monthly Statistics now shows a "Times Shown In" row
+      ("Local Time (LT)" or "UTC (converted to LT)"). Regression-tested
+      against the committed Roster Report fixture (still detects `LT`,
+      unchanged) and the calendar-grid format (untouched, different code
+      path). **Real bug found along the way**: one of last session's two
+      xlsx Rest-Day fixtures (`cwpCrewRosterReport1790644498711.xlsx`) is
+      itself a genuine raw-UTC export (unambiguous `16:00`/`00:30`
+      sentinels) that was silently mis-dated by the Rest Day feature the
+      whole time it shipped — now auto-detected and correctly converted.
 
 ## Needs a real phone (not available in this environment)
 

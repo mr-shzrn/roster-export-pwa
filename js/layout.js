@@ -97,6 +97,12 @@ window.RosterPWA = window.RosterPWA || {};
     if (headerTotals.rest_days !== undefined) {
       rows.push(['Rest Days', String(headerTotals.rest_days)]);
     }
+    if (headerTotals.source_timezone) {
+      rows.push(['Times Shown In', headerTotals.source_timezone === 'LT' ? 'Local Time (LT)' : headerTotals.source_timezone]);
+    }
+    if (headerTotals.source_timezone_uncertain) {
+      rows.push(['Note', 'Could not confirm LT/UTC (no day-off/OFF01 rows to check against) — verify times']);
+    }
     if (allowanceEstimate) {
       rows.push(['Payable Duty Hours', allowanceEstimate.payable_duty_hours.toFixed(2)]);
       rows.push(['Estimated Allowance (RM)', allowanceEstimate.total_payment.toFixed(2)]);

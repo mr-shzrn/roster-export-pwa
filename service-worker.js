@@ -31,6 +31,7 @@ const urlsToCache = [
   './js/pdf-textextract.js',
   './js/table-reconstruct.js',
   './js/columns.js',
+  './js/airport-timezones.js',
   './js/styled-roster-parser.js',
   './js/calendar-grid-parser.js',
   './js/xlsx-textextract.js',
