@@ -516,6 +516,20 @@ previously marked "needs a real device":
       itself a genuine raw-UTC export (unambiguous `16:00`/`00:30`
       sentinels) that was silently mis-dated by the Rest Day feature the
       whole time it shipped — now auto-detected and correctly converted.
+- [x] **2026-09-30, xlsx detection independently confirmed**: Shaz later
+      supplied `OCT UTC.xlsx`/`OCT LT.xlsx`, explicitly labeled — these
+      turned out to be re-exports of the exact same two files above
+      (identical parsed content, different file bytes/metadata only), so
+      Shaz's own labels confirm the auto-detector classified both files
+      correctly with zero prior knowledge of which was which. No exact-
+      match "gold test" applies to this pair (unlike the PDF pair, these
+      two are different live-roster snapshots ~8 minutes apart, not
+      identical content in two timezones — confirmed by the day-by-day
+      divergence starting Oct 2), but the conversion math itself is the
+      exact same shared code already gold-tested via the PDF pair. Also
+      confirmed by Shaz: the calendar-grid ("fridge view") format is
+      always LT — no auto-detection needed there, consistent with this
+      feature's scope decision to leave that format untouched.
 
 ## Needs a real phone (not available in this environment)
 
