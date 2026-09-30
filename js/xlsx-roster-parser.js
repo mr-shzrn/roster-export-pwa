@@ -14,11 +14,16 @@
  * letter. A duty reporting late at night can legitimately land on the
  * calendar day *before* its pairing reference's label (a normal overnight
  * report, not a bug) — styled-roster-parser.js already only *warns* about
- * that mismatch, never rejects on it, and this file does the same. What
- * *is* rejected: a gap of more than one calendar day between two
- * consecutive duty blocks with nothing filling it — confirmed (with a real
- * roster) to happen when an export's date-range filter runs against a UTC
- * day boundary instead of local time, silently dropping a day.
+ * that mismatch, never rejects on it, and this file does the same.
+ *
+ * A gap of more than one calendar day between two consecutive duty blocks
+ * means a day is missing from the source entirely — per real-world
+ * confirmation, this happens when the next day's duty starts before 08:00
+ * LT: the roster source system simply doesn't export a rest day in that
+ * case. Every missing day is filled in as `item: 'REST DAY'` (never
+ * rejected), tracked separately from ordinary days off via
+ * `header_totals.rest_days` and explained in the exported document's
+ * legend/code table.
  */
 window.RosterPWA = window.RosterPWA || {};
 
@@ -50,6 +55,13 @@ window.RosterPWA = window.RosterPWA || {};
   function dayIndex(parts) {
     return Math.round(Date.UTC(parts.year, parts.monthIdx, parts.day) / 86400000);
   }
+
+  function dateIndexToParts(idx) {
+    const d = new Date(idx * 86400000);
+    return { year: d.getUTCFullYear(), monthIdx: d.getUTCMonth(), day: d.getUTCDate() };
+  }
+
+  const REST_DAY_EXPLANATION = "Rest Day - next day's duty starts before 0800 LT.";
 
   function buildColumnMap(headerRow) {
     const map = {};
@@ -145,9 +157,24 @@ window.RosterPWA = window.RosterPWA || {};
             `Could not find a date for the duty starting with "${pairingCell}" `
             + '— this Excel file may be malformed or from an unsupported export.');
         }
-        const parts = excelSerialToDateParts(dateCell);
+        let idx = dayIndex(excelSerialToDateParts(dateCell));
+
+        // A day-off's own timestamp is when the rest *starts* — the evening
+        // of the day a duty ended — which can land on the very same
+        // calendar day as that already-recorded duty (confirmed in a real
+        // file: a 4-leg duty debriefing midday, then a fresh 'D' block
+        // starting that same evening, both decoding to the same date). A
+        // single calendar day can't be both a duty day and a day off, and
+        // the printed-roster convention (confirmed against a real
+        // ground-truth export) always attributes the day off to the day
+        // *after* — so bump it forward past whatever the previous block
+        // already occupies.
+        if (DAYOFF_CODES.includes(pairingCell) && blockRanges.length && idx <= blockRanges[blockRanges.length - 1].end) {
+          idx = blockRanges[blockRanges.length - 1].end + 1;
+        }
+
+        const parts = dateIndexToParts(idx);
         const curDateStr = formatDateParts(parts);
-        const idx = dayIndex(parts);
         blockRanges.push({ start: idx, end: idx });
 
         const pairingRef = PAIRING_RE.test(pairingCell) ? pairingCell : '';
@@ -201,27 +228,37 @@ window.RosterPWA = window.RosterPWA || {};
     }
 
     // A gap of more than one calendar day between the end of one block's
-    // occupied range and the start of the next, with no row filling it,
-    // means a day silently vanished from the export — confirmed (against a
-    // real roster) to happen when the export's date-range filter runs on a
-    // UTC day boundary instead of local time. Fail loudly rather than
-    // produce a roster with a missing day the user has no way to notice.
-    for (let i = 1; i < blockRanges.length; i++) {
-      const gap = blockRanges[i].start - blockRanges[i - 1].end;
-      if (gap > 1) {
-        throw new Error(
-          "This roster's dates don't add up — it may have been exported in UTC "
-          + `instead of local time (a ${gap - 1}-day gap between `
-          + `${dutyDays[i - 1].date} and ${dutyDays[i].date}, with nothing in between). `
-          + 'Re-export the roster in local time and try again.');
+    // occupied range and the start of the next means a day is missing from
+    // the source entirely — confirmed (against real rosters) to happen when
+    // the next day's duty starts before 08:00 LT: the source system simply
+    // doesn't export a rest day in that case. Every missing day is filled
+    // in as a Rest Day, tracked separately from ordinary days off.
+    const filledDutyDays = [];
+    const legend = {};
+    for (let i = 0; i < dutyDays.length; i++) {
+      if (i > 0) {
+        const gap = blockRanges[i].start - blockRanges[i - 1].end;
+        for (let g = 1; g < gap; g++) {
+          const missingParts = dateIndexToParts(blockRanges[i - 1].end + g);
+          const missingDateStr = formatDateParts(missingParts);
+          filledDutyDays.push({
+            date: missingDateStr, day: sp.weekdayAbbrev(missingDateStr),
+            duty_start: '', duty_hours: '', duty_end: '', item: 'REST DAY', legs: [],
+          });
+          legend['REST DAY'] = REST_DAY_EXPLANATION;
+        }
       }
+      filledDutyDays.push(dutyDays[i]);
     }
 
-    const [atBase, away] = computeOffDaysSplitSafe(sp, dutyDays, crewInfo.base || 'KUL');
+    const headerTotalsRestDays = filledDutyDays.filter((d) => d.item === 'REST DAY').length;
+    headerTotals.rest_days = headerTotalsRestDays;
+
+    const [atBase, away] = computeOffDaysSplitSafe(sp, filledDutyDays, crewInfo.base || 'KUL');
     headerTotals.at_base = atBase;
     headerTotals.away = away;
 
-    return { crew_info: crewInfo, month_year: monthYear, header_totals: headerTotals, duty_days: dutyDays, legend: {}, warnings };
+    return { crew_info: crewInfo, month_year: monthYear, header_totals: headerTotals, duty_days: filledDutyDays, legend, warnings };
   }
 
   function appendLeg(sp, day, row, colMap, item) {

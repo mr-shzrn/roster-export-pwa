@@ -34,7 +34,7 @@
         <input type="file" id="file-input" accept="application/pdf,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
       </label>
       <p class="hint">PDF (Roster Report or Calendar Grid) or Excel (Roster Report) export.</p>
-      <p class="hint">Make sure the roster was exported in local time — an export taken in UTC can shift or drop dates.</p>
+      <div class="local-time-notice">Export in Local Time (LT). This app assumes every time in the roster is LT — an export taken in UTC can shift or silently drop dates.</div>
       <div id="status" class="status" hidden></div>
       <button id="start-over-btn" class="link-btn" type="button" hidden>Start over</button>
     </section>

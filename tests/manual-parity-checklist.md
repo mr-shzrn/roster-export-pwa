@@ -422,6 +422,65 @@ previously marked "needs a real device":
       cache, a complete upload→parse→export cycle succeeded with zero
       network requests, zero console errors, same correct output
       (`CAPT AHMAD BIN TESTING August 2026.pdf`) as the online path.
+- [x] **2026-09-30, xlsx "Rest Day" feature**: two real xlsx exports were
+      each missing different calendar days entirely from the source (the
+      roster system doesn't export a rest day when the next day's duty
+      starts before 08:00 LT). `xlsx-roster-parser.js` used to hard-reject
+      the whole file on any such gap; now every missing date is filled in
+      unconditionally as `item: 'REST DAY'`, tracked in its own
+      `header_totals.rest_days` stat (excluded from `at_base`/`away`), with
+      a `legend['REST DAY']` explanation rendered in the exported
+      Code/Description table. Along the way found and fixed a real latent
+      date-collision bug: a `'D'`/`'DO1'` day-off's own raw timestamp can
+      land on the same calendar day as an already-recorded duty (the
+      day-off's timestamp is when rest *starts*, i.e. that evening), which
+      was silently invisible before this change since the old hard-reject
+      always aborted parsing before reaching the affected rows. Re-verified
+      exact-match on both real fixtures (`rest_days: 3` each, correct
+      dates). Also added an explicit "Export in Local Time (LT)" UI
+      callout (`index.html`/`styles.css`) since a UTC-exported roster can
+      silently shift or drop dates the same way.
+- [x] **2026-09-30, calendar-grid PDF with content-level rotation**: a real
+      "fridge view" calendar-grid PDF (`page.rotate === 0`, but every glyph
+      individually drawn with a baked-in 270° rotation in its own text
+      matrix — a fundamentally different mechanism from a page-level
+      `/Rotate` flag) failed format detection entirely (`"unknown"`).
+      Fixed in `pdf-textextract.js`: `detectContentRotation()` samples each
+      text item's own transform (`atan2(b,a)`) and, when a dominant
+      non-zero rotation is found across enough samples, overrides
+      `page.getViewport({rotation})` with it — same mechanism already
+      proven for real page-level rotation, just detected from content
+      instead of the page dictionary. Fixing extraction exposed two further
+      real bugs in `calendar-grid-parser.js`, both latent because the
+      original calendar-grid fixture this parser was built against never
+      triggered them:
+      1. `parseHeader()` matched `MONTH_YEAR_RE`/`CREW_LINE_RE` against each
+         raw text item individually, assuming pdf.js always hands back
+         "October 2026" and the crew-info line as one combined string. This
+         file draws them as several separate per-word items on the same
+         line instead. Fixed by matching against each physical line's
+         *joined* text (via the already-existing `groupIntoPhysicalLines`)
+         instead of raw items — the same technique `detectGridColumns()`
+         and `buildCellsForColumn()` already used, so this is
+         backward-compatible by construction.
+      2. Per-glyph column assignment (`nearestColumn` applied to each raw
+         item independently) misassigned the tail of long flight lines
+         (e.g. "MH 125 KUL 08:55 - PER 14:50") to the next day's column
+         once their x-position drifted past the inter-column midpoint —
+         this file's day-cells are narrow enough that a full flight line's
+         text visually overflows into the neighboring cell. Fixed by
+         `assignItemsToColumns()`: walk each physical row left-to-right and
+         only allow a token to start a new column once the column built so
+         far already forms a *complete* recognized cell fragment (a whole
+         activity, REPORT/DEBRIEF/layover line, date cell, or day-off code)
+         — an in-progress pattern keeps pulling in tokens regardless of
+         their own nearest-column, since a real cell boundary never falls
+         mid-pattern. Verified all 31 October days parse with complete,
+         correct flight/leg data; full render visually confirmed via
+         `qlmanage` thumbnail. Regression-tested against the committed
+         Roster Report fixture (`roster_report_aug2026.pdf`, format
+         detection + parse unchanged) and both xlsx fixtures (untouched,
+         as expected — different code path).
 
 ## Needs a real phone (not available in this environment)
 

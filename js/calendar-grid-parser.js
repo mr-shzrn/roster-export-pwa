@@ -81,16 +81,61 @@ window.RosterPWA = window.RosterPWA || {};
     return best;
   }
 
+  /** True once `text` is a fully-formed cell fragment on its own (a whole
+   * date cell, activity, REPORT/DEBRIEF/layover line, or day-off code) —
+   * not just a prefix of one. */
+  function isCompleteCellFragment(text) {
+    return DAYOFF_CODES.includes(text) || DATE_CELL_RE.test(text) ||
+      ACTIVITY_RE.test(text) || REPORT_RE.test(text) ||
+      DEBRIEF_RE.test(text) || LAYOVER_RE.test(text);
+  }
+
+  /** Some exports pack a full flight line ("MH 125 KUL 08:55 - PER 14:50")
+   * so tightly that its trailing tokens' x lands past the midpoint into
+   * the next day's column, so per-glyph nearestColumn alone misassigns
+   * them. Fix: walk each physical row left-to-right and only let a token
+   * start a new column once the column being built so far already forms
+   * a complete cell fragment — an in-progress ("dangling") one keeps
+   * pulling in tokens regardless of their own nearest-column, since a
+   * real cell boundary never falls mid-pattern. */
+  function assignItemsToColumns(items, anchors) {
+    const cellsByColumn = Array.from({ length: 7 }, () => []);
+    for (const row of groupIntoPhysicalLines(items)) {
+      const rowItems = row.items;
+      if (!rowItems.length) continue;
+      let currentCol = nearestColumn(rowItems[0].x, anchors);
+      let acc = [rowItems[0]];
+      for (let i = 1; i < rowItems.length; i++) {
+        const accText = acc.map((it) => it.str.trim()).join(' ').trim();
+        const nextCol = nearestColumn(rowItems[i].x, anchors);
+        if (nextCol !== currentCol && isCompleteCellFragment(accText)) {
+          cellsByColumn[currentCol].push(...acc);
+          acc = [rowItems[i]];
+          currentCol = nextCol;
+        } else {
+          acc.push(rowItems[i]);
+        }
+      }
+      cellsByColumn[currentCol].push(...acc);
+    }
+    return cellsByColumn;
+  }
+
   function parseHeader(items) {
     const result = { month: '', year: '', name: '', staff_number: '', fleet: '', rank: '', base: '' };
-    for (const it of items) {
-      const my = MONTH_YEAR_RE.exec(it.str.trim());
+    // Some exports draw "October" and "2026" (or the crew line's words) as
+    // separate text items on the same physical line rather than one
+    // combined string, so match against each line's joined text — same
+    // technique detectGridColumns()/buildCellsForColumn() already use.
+    for (const line of groupIntoPhysicalLines(items)) {
+      const text = line.items.map((it) => it.str.trim()).join(' ').trim();
+      const my = MONTH_YEAR_RE.exec(text);
       if (my && MONTH_MAP[my[1].toLowerCase().slice(0, 3)]) {
         result.month = MONTH_MAP[my[1].toLowerCase().slice(0, 3)];
         result.year = my[2];
         continue;
       }
-      const cm = CREW_LINE_RE.exec(it.str.trim());
+      const cm = CREW_LINE_RE.exec(text);
       if (cm) {
         result.name = cm[1].trim();
         result.staff_number = cm[2];
@@ -233,12 +278,7 @@ window.RosterPWA = window.RosterPWA || {};
 
     const header = parseHeader(page.items);
     const monthYear = `${header.month} ${header.year}`.trim();
-    const cellsByColumn = Array.from({ length: 7 }, () => []);
-
-    for (const item of page.items) {
-      const col = nearestColumn(item.x, colAnchors);
-      cellsByColumn[col].push(item);
-    }
+    const cellsByColumn = assignItemsToColumns(page.items, colAnchors);
 
     let allCells = [];
     for (const colItems of cellsByColumn) {

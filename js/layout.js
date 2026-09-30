@@ -94,6 +94,9 @@ window.RosterPWA = window.RosterPWA || {};
       ['OFF Days At Base', String(headerTotals.at_base ?? '')],
       ['OFF Days Away From Base', String(headerTotals.away ?? '')],
     ];
+    if (headerTotals.rest_days !== undefined) {
+      rows.push(['Rest Days', String(headerTotals.rest_days)]);
+    }
     if (allowanceEstimate) {
       rows.push(['Payable Duty Hours', allowanceEstimate.payable_duty_hours.toFixed(2)]);
       rows.push(['Estimated Allowance (RM)', allowanceEstimate.total_payment.toFixed(2)]);
